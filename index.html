@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zemli - Карта мира</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background: #1a1a1a;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            cursor: grab;
+        }
+
+        #gameCanvas:active {
+            cursor: grabbing;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+
+        .controls button {
+            width: 50px;
+            height: 50px;
+            border-radius: 25px;
+            background: rgba(30, 30, 30, 0.9);
+            color: white;
+            border: 2px solid #444;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+
+        .controls button:hover {
+            background: #444;
+            border-color: #666;
+            transform: scale(1.1);
+        }
+
+        .coordinates {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-family: monospace;
+            border: 1px solid #444;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .biome-info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            border: 1px solid #444;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .title {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border: 1px solid #444;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body>
+    <div class="title">🗺️ ZEMLI</div>
+    <div class="biome-info" id="biomeInfo">Равнина</div>
+    <div class="coordinates" id="coords">X: 0, Y: 0</div>
+
+    <div class="controls">
+        <button id="zoomIn">+</button>
+        <button id="zoomOut">-</button>
+        <button id="center">🏠</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
