@@ -8,6 +8,7 @@ const CENTER_Y = Math.floor(MAP_HEIGHT / 2);
 let cameraX = CENTER_X * TILE_SIZE - window.innerWidth / 2;
 let cameraY = CENTER_Y * TILE_SIZE - window.innerHeight / 2;
 let scale = 0.7;
+let actionMode = null;
 const SPECIAL_BUILDING = {
   x: 12,
   y: 8,
@@ -235,6 +236,14 @@ function centerCameraOnRelativeArea(relX, relY, width = 1, height = 1) {
   cameraY = worldCenterY * tile - window.innerHeight / 2;
 }
 
+function setActionMode(mode) {
+  actionMode = mode;
+  document.querySelectorAll('.action-btn').forEach((btn) => btn.classList.remove('active'));
+  if (mode === 'build') document.getElementById('actionBuild')?.classList.add('active');
+  if (mode === 'move') document.getElementById('actionMove')?.classList.add('active');
+  if (mode === 'army') document.getElementById('actionArmy')?.classList.add('active');
+}
+
 function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
   if (tile <= 0.01) return;
@@ -370,18 +379,15 @@ window.onload = function () {
     cameraY = (worldY * TILE_SIZE * scale) - mouseY;
   });
 
-  const zoomIn = document.getElementById('zoomIn');
-  const zoomOut = document.getElementById('zoomOut');
-  const center = document.getElementById('center');
-  const toBuilding = document.getElementById('toBuilding');
+  const actionBuild = document.getElementById('actionBuild');
+  const actionMove = document.getElementById('actionMove');
+  const actionArmy = document.getElementById('actionArmy');
+  const actionHome = document.getElementById('actionHome');
 
-  if (zoomIn) zoomIn.onclick = () => { scale *= 1.4; };
-  if (zoomOut) zoomOut.onclick = () => { scale /= 1.4; };
-  if (center) center.onclick = () => {
-    cameraX = CENTER_X * TILE_SIZE - window.innerWidth / 2;
-    cameraY = CENTER_Y * TILE_SIZE - window.innerHeight / 2;
-  };
-  if (toBuilding) toBuilding.onclick = () => {
+  if (actionBuild) actionBuild.onclick = () => setActionMode('build');
+  if (actionMove) actionMove.onclick = () => setActionMode('move');
+  if (actionArmy) actionArmy.onclick = () => setActionMode('army');
+  if (actionHome) actionHome.onclick = () => {
     centerCameraOnRelativeArea(
       SPECIAL_BUILDING.x,
       SPECIAL_BUILDING.y,
@@ -389,6 +395,24 @@ window.onload = function () {
       SPECIAL_BUILDING.height
     );
   };
+
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    const worldX = (clickX + cameraX) / (TILE_SIZE * scale);
+    const worldY = (clickY + cameraY) / (TILE_SIZE * scale);
+    const tileX = Math.floor(worldX) - CENTER_X;
+    const tileY = Math.floor(worldY) - CENTER_Y;
+
+    if (actionMode === 'build') {
+      console.log(`🏗️ Построить на (${tileX}, ${tileY})`);
+    } else if (actionMode === 'move') {
+      console.log(`🚚 Переместить в (${tileX}, ${tileY})`);
+    } else if (actionMode === 'army') {
+      console.log(`⚔️ Отправить армию на (${tileX}, ${tileY})`);
+    }
+  });
 
   function animate() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
