@@ -3,7 +3,7 @@ const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 1000;
 const CENTER_X = Math.floor(MAP_WIDTH / 2);
 const CENTER_Y = Math.floor(MAP_HEIGHT / 2);
-const VIEW_RADIUS = 10;
+const VIEW_RADIUS = 15;
 
 let scale = 0.8;
 let cameraX = CENTER_X * TILE_SIZE * scale - window.innerWidth / 2;
@@ -24,6 +24,7 @@ const player = {
 };
 
 const buildingsMap = {};
+let towerRadius = 0;
 
 const BIOME_COLORS = {
   WATER: "#0a2f6a",
@@ -96,19 +97,41 @@ function getBiomeColor(biome) {
 }
 
 function getSpawnForRace(race) {
-  for (let attempt = 0; attempt < 1000; attempt++) {
-    const x = CENTER_X + Math.floor(Math.random() * 200 - 100);
-    const y = CENTER_Y + Math.floor(Math.random() * 200 - 100);
-    const biome = biomeMap[x]?.[y];
+  const targetBiome = {
+    knights: "PLAINS",
+    samurai: "FOREST",
+    vikings: "COAST",
+    mongols: "STEPPE",
+    desert: "DESERT",
+    aztecs: "JUNGLE"
+  }[race];
 
-    if (race === "knights" && biome === "PLAINS") return { x: x - CENTER_X, y: y - CENTER_Y };
-    if (race === "samurai" && biome === "FOREST") return { x: x - CENTER_X, y: y - CENTER_Y };
-    if (race === "vikings" && (biome === "WATER" || biome === "COAST")) return { x: x - CENTER_X, y: y - CENTER_Y };
-    if (race === "mongols" && biome === "STEPPE") return { x: x - CENTER_X, y: y - CENTER_Y };
-    if (race === "desert" && biome === "DESERT") return { x: x - CENTER_X, y: y - CENTER_Y };
-    if (race === "aztecs" && biome === "JUNGLE") return { x: x - CENTER_X, y: y - CENTER_Y };
+  if (!targetBiome) return { x: 0, y: 0 };
+
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const x = Math.floor(Math.random() * MAP_WIDTH);
+    const y = Math.floor(Math.random() * MAP_HEIGHT);
+    if (biomeMap[x]?.[y] === targetBiome) {
+      return { x: x - CENTER_X, y: y - CENTER_Y };
+    }
   }
   return { x: 0, y: 0 };
+}
+
+function getViewRadius() {
+  return VIEW_RADIUS + towerRadius;
+}
+
+function addTower() {
+  towerRadius += 10;
+  needsRedraw = true;
+}
+
+function isInViewRange(centerX, centerY, targetX, targetY) {
+  const dx = Math.abs(centerX - targetX);
+  const dy = Math.abs(centerY - targetY);
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return distance <= getViewRadius();
 }
 
 function addBuilding(building) {
@@ -157,26 +180,32 @@ function drawMap(ctx, canvas) {
 
   const centerX = player.homeX + CENTER_X;
   const centerY = player.homeY + CENTER_Y;
+  const radius = getViewRadius();
+  const half = tile / 2;
 
   ctx.imageSmoothingEnabled = false;
 
-  for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-    for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
-      const x = centerX + dx;
-      const y = centerY + dy;
-      const screenX = dx * tile + canvas.width / 2 - tile / 2;
-      const screenY = dy * tile + canvas.height / 2 - tile / 2;
+  const startCol = Math.max(0, centerX - radius);
+  const startRow = Math.max(0, centerY - radius);
+  const endCol = Math.min(MAP_WIDTH, centerX + radius + 1);
+  const endRow = Math.min(MAP_HEIGHT, centerY + radius + 1);
 
-      if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-        const biome = biomeMap[x]?.[y] || "WATER";
-        ctx.fillStyle = getBiomeColor(biome);
-      } else {
-        ctx.fillStyle = "#111";
-      }
-
+  for (let row = startRow; row < endRow; row++) {
+    for (let col = startCol; col < endCol; col++) {
+      if (!isInViewRange(centerX, centerY, col, row)) continue;
+      const screenX = ((col - centerX) * tile) + canvas.width / 2 - half;
+      const screenY = ((row - centerY) * tile) + canvas.height / 2 - half;
+      const biome = biomeMap[col]?.[row] || "WATER";
+      ctx.fillStyle = getBiomeColor(biome);
       ctx.fillRect(screenX, screenY, tile + 1, tile + 1);
     }
   }
+
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = Math.max(1, tile * 0.06);
+  ctx.beginPath();
+  ctx.arc(canvas.width / 2, canvas.height / 2, radius * tile, 0, Math.PI * 2);
+  ctx.stroke();
 
   return { tile };
 }
@@ -187,7 +216,11 @@ function drawBuildings(ctx, canvas, view) {
 
   for (const key in buildingsMap) {
     const b = buildingsMap[key];
-    if (Math.abs(b.x - player.homeX) > VIEW_RADIUS || Math.abs(b.y - player.homeY) > VIEW_RADIUS) continue;
+    const worldX = b.x + CENTER_X;
+    const worldY = b.y + CENTER_Y;
+    const centerX = player.homeX + CENTER_X;
+    const centerY = player.homeY + CENTER_Y;
+    if (!isInViewRange(centerX, centerY, worldX, worldY)) continue;
 
     const pos = worldToScreenAroundPlayer(b.x, b.y, canvas);
     const bw = (b.width || 1) * tile;
@@ -281,6 +314,8 @@ window.onload = function () {
 
     if (actionMode === "build") {
       console.log(`🏗️ Построить на (${targetX}, ${targetY})`);
+      // Temporary: tower build increases view radius.
+      addTower();
       return;
     }
     if (actionMode === "army") {
