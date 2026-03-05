@@ -274,11 +274,24 @@ function drawMap(ctx, canvas) {
       buildingDrawX + buildingW < 0 ||
       buildingDrawY + buildingH < 0)
   ) {
-    ctx.fillStyle = SPECIAL_BUILDING.color;
-    ctx.fillRect(buildingDrawX, buildingDrawY, buildingW, buildingH);
-    ctx.strokeStyle = '#5f5f5f';
-    ctx.lineWidth = Math.max(1, tile * 0.08);
-    ctx.strokeRect(buildingDrawX, buildingDrawY, buildingW, buildingH);
+    const stickerX = buildingDrawX + buildingW / 2;
+    const stickerY = buildingDrawY + buildingH / 2;
+    const stickerRadius = Math.max(8, tile * 0.52);
+    const stickerSize = Math.max(20, tile * 1.05);
+
+    ctx.beginPath();
+    ctx.arc(stickerX, stickerY, stickerRadius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)';
+    ctx.lineWidth = Math.max(1, tile * 0.06);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${stickerSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Courier New",sans-serif`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('🏰', stickerX, stickerY + tile * 0.02);
   }
 }
 
