@@ -25,6 +25,25 @@ const player = {
 
 const buildingsMap = {};
 let towerRadius = 0;
+let selectedBuilding = null;
+let selectedCost = "";
+
+const resources = {
+  wood: 100,
+  stone: 50,
+  iron: 30,
+  gold: 20
+};
+
+const buildingEmoji = {
+  lumber: "🪓",
+  mine: "⛏️",
+  farm: "🌾",
+  barracks: "⚔️",
+  wall: "🧱",
+  tower: "🗼",
+  gold: "💰"
+};
 
 const BIOME_COLORS = {
   WATER: "#0a2f6a",
@@ -183,6 +202,45 @@ function addBuilding(building) {
   buildingsMap[`${building.x},${building.y}`] = building;
 }
 
+function getBuilding(x, y) {
+  return buildingsMap[`${x},${y}`] || null;
+}
+
+function parseCost(costString) {
+  const result = {};
+  const re = /(\d+)\s*(wood|stone|iron|gold)/g;
+  let match = null;
+  while ((match = re.exec((costString || "").toLowerCase())) !== null) {
+    result[match[2]] = (result[match[2]] || 0) + Number(match[1]);
+  }
+  return result;
+}
+
+function canAfford(costString) {
+  const required = parseCost(costString);
+  return Object.keys(required).every((key) => (resources[key] || 0) >= required[key]);
+}
+
+function spendResources(costString) {
+  const required = parseCost(costString);
+  Object.keys(required).forEach((key) => {
+    resources[key] = Math.max(0, (resources[key] || 0) - required[key]);
+  });
+}
+
+function drawResources(ctx) {
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = '16px "Courier New"';
+  ctx.fillText(`🪵 ${resources.wood} 🪨 ${resources.stone} ⛏️ ${resources.iron} 💰 ${resources.gold}`, 10, 30);
+}
+
+function updateInventoryButtons() {
+  document.querySelectorAll(".inv-btn").forEach((btn) => {
+    const cost = btn.dataset.cost || "";
+    btn.disabled = !canAfford(cost);
+  });
+}
+
 function worldToScreenAroundPlayer(relX, relY, canvas) {
   const tile = TILE_SIZE * scale;
   const dx = relX - player.homeX;
@@ -320,6 +378,18 @@ window.onload = function () {
   addBuilding({ x: player.homeX, y: player.homeY, width: 2, height: 2, color: "#8B8B8B", emoji: "🏰" });
 
   updateCameraForPlayer(canvas);
+  updateInventoryButtons();
+
+  document.querySelectorAll(".inv-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      document.querySelectorAll(".inv-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      selectedBuilding = btn.dataset.type || null;
+      selectedCost = btn.dataset.cost || "";
+      setActionMode("build");
+    });
+  });
 
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -352,6 +422,37 @@ window.onload = function () {
     const targetY = player.homeY + tileY;
 
     if (actionMode === "build") {
+      if (!selectedBuilding) {
+        alert("Выбери постройку в инвентаре");
+        return;
+      }
+      if (!canAfford(selectedCost)) {
+        alert("Не хватает ресурсов!");
+        updateInventoryButtons();
+        return;
+      }
+      if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) {
+        return;
+      }
+      if (getBuilding(targetX, targetY)) {
+        alert("Здесь уже есть постройка");
+        return;
+      }
+
+      spendResources(selectedCost);
+      addBuilding({
+        x: targetX,
+        y: targetY,
+        width: 1,
+        height: 1,
+        emoji: buildingEmoji[selectedBuilding] || "🏠",
+        type: selectedBuilding
+      });
+      if (selectedBuilding === "tower") {
+        addTower();
+      }
+      updateInventoryButtons();
+      needsRedraw = true;
       console.log(`🏗️ Построить на (${targetX}, ${targetY})`);
       return;
     }
@@ -377,6 +478,7 @@ window.onload = function () {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const view = drawMap(ctx, canvas);
       drawBuildings(ctx, canvas, view);
+      drawResources(ctx);
 
       lastCameraX = cameraX;
       lastCameraY = cameraY;
