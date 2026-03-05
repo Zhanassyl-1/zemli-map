@@ -3,7 +3,7 @@ const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 1000;
 const CENTER_X = Math.floor(MAP_WIDTH / 2);
 const CENTER_Y = Math.floor(MAP_HEIGHT / 2);
-const VIEW_RADIUS = 15;
+const BASE_RADIUS = 10;
 
 let scale = 0.8;
 let cameraX = CENTER_X * TILE_SIZE * scale - window.innerWidth / 2;
@@ -24,7 +24,7 @@ const player = {
 };
 
 const buildingsMap = {};
-let towerRadius = 0;
+let towerCount = 0;
 let selectedBuilding = null;
 let selectedCost = "";
 
@@ -183,12 +183,38 @@ function getSpawnForRace(race) {
 }
 
 function getViewRadius() {
-  return VIEW_RADIUS + towerRadius;
+  return BASE_RADIUS + towerCount * 2;
 }
 
-function addTower() {
-  towerRadius += 10;
+function getTowerCost() {
+  return {
+    wood: 50 * Math.pow(2, towerCount),
+    stone: 30 * Math.pow(2, towerCount)
+  };
+}
+
+function canAffordTower() {
+  const cost = getTowerCost();
+  return resources.wood >= cost.wood && resources.stone >= cost.stone;
+}
+
+function buildTower(x, y) {
+  const cost = getTowerCost();
+  if (!canAffordTower()) return false;
+
+  resources.wood -= cost.wood;
+  resources.stone -= cost.stone;
+  towerCount += 1;
+  addBuilding({
+    x,
+    y,
+    width: 1,
+    height: 1,
+    emoji: "🗼",
+    type: "tower"
+  });
   needsRedraw = true;
+  return true;
 }
 
 function isInViewRange(centerX, centerY, targetX, targetY) {
@@ -236,7 +262,14 @@ function drawResources(ctx) {
 
 function updateInventoryButtons() {
   document.querySelectorAll(".inv-btn").forEach((btn) => {
+    const type = btn.dataset.type || "";
     const cost = btn.dataset.cost || "";
+    if (type === "tower") {
+      const towerCost = getTowerCost();
+      btn.textContent = `🗼 Вышка (${towerCost.wood}🪵 ${towerCost.stone}🪨)`;
+      btn.disabled = !canAffordTower();
+      return;
+    }
     btn.disabled = !canAfford(cost);
   });
 }
@@ -426,11 +459,6 @@ window.onload = function () {
         alert("Выбери постройку в инвентаре");
         return;
       }
-      if (!canAfford(selectedCost)) {
-        alert("Не хватает ресурсов!");
-        updateInventoryButtons();
-        return;
-      }
       if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) {
         return;
       }
@@ -439,17 +467,27 @@ window.onload = function () {
         return;
       }
 
-      spendResources(selectedCost);
-      addBuilding({
-        x: targetX,
-        y: targetY,
-        width: 1,
-        height: 1,
-        emoji: buildingEmoji[selectedBuilding] || "🏠",
-        type: selectedBuilding
-      });
       if (selectedBuilding === "tower") {
-        addTower();
+        if (!buildTower(targetX, targetY)) {
+          alert("Не хватает ресурсов на вышку!");
+          updateInventoryButtons();
+          return;
+        }
+      } else {
+        if (!canAfford(selectedCost)) {
+          alert("Не хватает ресурсов!");
+          updateInventoryButtons();
+          return;
+        }
+        spendResources(selectedCost);
+        addBuilding({
+          x: targetX,
+          y: targetY,
+          width: 1,
+          height: 1,
+          emoji: buildingEmoji[selectedBuilding] || "🏠",
+          type: selectedBuilding
+        });
       }
       updateInventoryButtons();
       needsRedraw = true;
