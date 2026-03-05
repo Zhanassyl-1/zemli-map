@@ -60,6 +60,18 @@
             transform: scale(1.1);
         }
 
+        .controls button#toBuilding {
+            width: auto;
+            padding: 0 12px;
+            font-size: 14px;
+            background: #5f5f5f;
+            border-color: #8b8b8b;
+        }
+
+        .controls button#toBuilding:hover {
+            background: #767676;
+        }
+
         .coordinates {
             position: fixed;
             bottom: 20px;
@@ -114,6 +126,7 @@
         <button id="zoomIn">+</button>
         <button id="zoomOut">-</button>
         <button id="center">🏠</button>
+        <button id="toBuilding">🏠 К зданию</button>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -121,4 +134,3 @@
     <script src="script.js"></script>
 </body>
 </html>
-

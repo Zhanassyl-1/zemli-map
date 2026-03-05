@@ -8,6 +8,13 @@ const CENTER_Y = Math.floor(MAP_HEIGHT / 2);
 let cameraX = CENTER_X * TILE_SIZE - window.innerWidth / 2;
 let cameraY = CENTER_Y * TILE_SIZE - window.innerHeight / 2;
 let scale = 0.7;
+const SPECIAL_BUILDING = {
+  x: 12,
+  y: 8,
+  width: 2,
+  height: 2,
+  color: '#8B8B8B'
+};
 
 const tg = window.Telegram?.WebApp;
 if (tg) {
@@ -220,6 +227,14 @@ function biomeName(code) {
   }
 }
 
+function centerCameraOnRelativeArea(relX, relY, width = 1, height = 1) {
+  const tile = TILE_SIZE * scale;
+  const worldCenterX = relX + CENTER_X + (width / 2);
+  const worldCenterY = relY + CENTER_Y + (height / 2);
+  cameraX = worldCenterX * tile - window.innerWidth / 2;
+  cameraY = worldCenterY * tile - window.innerHeight / 2;
+}
+
 function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
   if (tile <= 0.01) return;
@@ -244,6 +259,26 @@ function drawMap(ctx, canvas) {
       ctx.fillStyle = COLORS[b] || '#90be6d';
       ctx.fillRect(x, y, tile + 1, tile + 1);
     }
+  }
+
+  const buildingWorldX = SPECIAL_BUILDING.x + CENTER_X;
+  const buildingWorldY = SPECIAL_BUILDING.y + CENTER_Y;
+  const buildingDrawX = buildingWorldX * tile - cameraX;
+  const buildingDrawY = buildingWorldY * tile - cameraY;
+  const buildingW = SPECIAL_BUILDING.width * tile;
+  const buildingH = SPECIAL_BUILDING.height * tile;
+
+  if (
+    !(buildingDrawX > canvas.width ||
+      buildingDrawY > canvas.height ||
+      buildingDrawX + buildingW < 0 ||
+      buildingDrawY + buildingH < 0)
+  ) {
+    ctx.fillStyle = SPECIAL_BUILDING.color;
+    ctx.fillRect(buildingDrawX, buildingDrawY, buildingW, buildingH);
+    ctx.strokeStyle = '#5f5f5f';
+    ctx.lineWidth = Math.max(1, tile * 0.08);
+    ctx.strokeRect(buildingDrawX, buildingDrawY, buildingW, buildingH);
   }
 }
 
@@ -325,12 +360,21 @@ window.onload = function () {
   const zoomIn = document.getElementById('zoomIn');
   const zoomOut = document.getElementById('zoomOut');
   const center = document.getElementById('center');
+  const toBuilding = document.getElementById('toBuilding');
 
   if (zoomIn) zoomIn.onclick = () => { scale *= 1.4; };
   if (zoomOut) zoomOut.onclick = () => { scale /= 1.4; };
   if (center) center.onclick = () => {
     cameraX = CENTER_X * TILE_SIZE - window.innerWidth / 2;
     cameraY = CENTER_Y * TILE_SIZE - window.innerHeight / 2;
+  };
+  if (toBuilding) toBuilding.onclick = () => {
+    centerCameraOnRelativeArea(
+      SPECIAL_BUILDING.x,
+      SPECIAL_BUILDING.y,
+      SPECIAL_BUILDING.width,
+      SPECIAL_BUILDING.height
+    );
   };
 
   function animate() {
