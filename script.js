@@ -3,7 +3,7 @@ const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 1000;
 const CENTER_X = Math.floor(MAP_WIDTH / 2);
 const CENTER_Y = Math.floor(MAP_HEIGHT / 2);
-const LOAD_RADIUS = 10;
+const VIEW_RADIUS = 10;
 
 let scale = 0.8;
 let cameraX = CENTER_X * TILE_SIZE * scale - window.innerWidth / 2;
@@ -16,10 +16,6 @@ let lastCameraY = cameraY;
 let lastScale = scale;
 
 const biomeMap = new Array(MAP_WIDTH).fill(null).map(() => new Array(MAP_HEIGHT));
-const loadedChunks = new Set();
-
-let lastLoadedCenterX = 0;
-let lastLoadedCenterY = 0;
 
 const player = {
   race: "knights",
@@ -99,19 +95,6 @@ function getBiomeColor(biome) {
   return BIOME_COLORS[biome] || "#111";
 }
 
-function updateLoadedChunks(centerX, centerY) {
-  loadedChunks.clear();
-  for (let dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
-    for (let dy = -LOAD_RADIUS; dy <= LOAD_RADIUS; dy++) {
-      loadedChunks.add(`${centerX + dx},${centerY + dy}`);
-    }
-  }
-}
-
-function isCellLoaded(x, y) {
-  return loadedChunks.has(`${x},${y}`);
-}
-
 function getSpawnForRace(race) {
   for (let attempt = 0; attempt < 1000; attempt++) {
     const x = CENTER_X + Math.floor(Math.random() * 200 - 100);
@@ -132,11 +115,13 @@ function addBuilding(building) {
   buildingsMap[`${building.x},${building.y}`] = building;
 }
 
-function worldToScreen(relX, relY) {
+function worldToScreenAroundPlayer(relX, relY, canvas) {
   const tile = TILE_SIZE * scale;
+  const dx = relX - player.homeX;
+  const dy = relY - player.homeY;
   return {
-    x: ((relX + CENTER_X) * tile) - cameraX,
-    y: ((relY + CENTER_Y) * tile) - cameraY
+    x: dx * tile + canvas.width / 2 - tile / 2,
+    y: dy * tile + canvas.height / 2 - tile / 2
   };
 }
 
@@ -148,6 +133,13 @@ function centerCameraOnRelativeArea(relX, relY, width = 1, height = 1, canvas = 
   const worldCenterY = relY + CENTER_Y + height / 2;
   cameraX = worldCenterX * tile - viewportW / 2;
   cameraY = worldCenterY * tile - viewportH / 2;
+  needsRedraw = true;
+}
+
+function updateCameraForPlayer(canvas) {
+  const tile = TILE_SIZE * scale;
+  cameraX = (player.homeX + CENTER_X) * tile - canvas.width / 2;
+  cameraY = (player.homeY + CENTER_Y) * tile - canvas.height / 2;
   needsRedraw = true;
 }
 
@@ -163,32 +155,26 @@ function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
   if (tile <= 0.01) return null;
 
-  let startCol = Math.floor(cameraX / tile);
-  let startRow = Math.floor(cameraY / tile);
-  let endCol = startCol + Math.ceil(canvas.width / tile) + 2;
-  let endRow = startRow + Math.ceil(canvas.height / tile) + 2;
-
-  startCol = Math.max(0, startCol);
-  startRow = Math.max(0, startRow);
-  endCol = Math.min(MAP_WIDTH, endCol);
-  endRow = Math.min(MAP_HEIGHT, endRow);
+  const centerX = player.homeX + CENTER_X;
+  const centerY = player.homeY + CENTER_Y;
 
   ctx.imageSmoothingEnabled = false;
 
-  for (let row = startRow; row < endRow; row++) {
-    const y = row * tile - cameraY;
-    for (let col = startCol; col < endCol; col++) {
-      const x = col * tile - cameraX;
-      const worldX = col - CENTER_X;
-      const worldY = row - CENTER_Y;
+  for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
+    for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
+      const x = centerX + dx;
+      const y = centerY + dy;
+      const screenX = dx * tile + canvas.width / 2 - tile / 2;
+      const screenY = dy * tile + canvas.height / 2 - tile / 2;
 
-      if (isCellLoaded(worldX, worldY)) {
-        const biome = biomeMap[col]?.[row] || "WATER";
+      if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+        const biome = biomeMap[x]?.[y] || "WATER";
         ctx.fillStyle = getBiomeColor(biome);
       } else {
         ctx.fillStyle = "#111";
       }
-      ctx.fillRect(x, y, tile + 1, tile + 1);
+
+      ctx.fillRect(screenX, screenY, tile + 1, tile + 1);
     }
   }
 
@@ -201,9 +187,9 @@ function drawBuildings(ctx, canvas, view) {
 
   for (const key in buildingsMap) {
     const b = buildingsMap[key];
-    if (!isCellLoaded(b.x, b.y)) continue;
+    if (Math.abs(b.x - player.homeX) > VIEW_RADIUS || Math.abs(b.y - player.homeY) > VIEW_RADIUS) continue;
 
-    const pos = worldToScreen(b.x, b.y);
+    const pos = worldToScreenAroundPlayer(b.x, b.y, canvas);
     const bw = (b.width || 1) * tile;
     const bh = (b.height || 1) * tile;
 
@@ -227,22 +213,6 @@ function drawBuildings(ctx, canvas, view) {
   }
 }
 
-function checkAndLoadChunks(canvas) {
-  const tile = TILE_SIZE * scale;
-  const centerTileX = Math.floor((cameraX + canvas.width / 2) / tile) - CENTER_X;
-  const centerTileY = Math.floor((cameraY + canvas.height / 2) / tile) - CENTER_Y;
-
-  if (
-    Math.abs(centerTileX - lastLoadedCenterX) > LOAD_RADIUS / 2 ||
-    Math.abs(centerTileY - lastLoadedCenterY) > LOAD_RADIUS / 2
-  ) {
-    updateLoadedChunks(centerTileX, centerTileY);
-    lastLoadedCenterX = centerTileX;
-    lastLoadedCenterY = centerTileY;
-    needsRedraw = true;
-  }
-}
-
 function parseRace() {
   const urlRace = new URLSearchParams(window.location.search).get("race");
   if (urlRace) return urlRace.toLowerCase();
@@ -262,7 +232,7 @@ window.onload = function () {
   function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    needsRedraw = true;
+    updateCameraForPlayer(canvas);
   }
 
   resizeCanvas();
@@ -275,48 +245,18 @@ window.onload = function () {
   player.homeX = spawn.x;
   player.homeY = spawn.y;
 
-  updateLoadedChunks(player.homeX, player.homeY);
-  lastLoadedCenterX = player.homeX;
-  lastLoadedCenterY = player.homeY;
-
   addBuilding({ x: player.homeX, y: player.homeY, width: 2, height: 2, color: "#8B8B8B", emoji: "🏰" });
 
-  centerCameraOnRelativeArea(player.homeX, player.homeY, 2, 2, canvas);
-
-  let isDragging = false;
-  let lastX = 0;
-  let lastY = 0;
-
-  canvas.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
-    cameraX -= dx;
-    cameraY -= dy;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    needsRedraw = true;
-  });
-
-  window.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
+  updateCameraForPlayer(canvas);
 
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const wx = Math.floor((mx + cameraX) / (TILE_SIZE * scale));
-    const wy = Math.floor((my + cameraY) / (TILE_SIZE * scale));
-
-    const relX = wx - CENTER_X;
-    const relY = wy - CENTER_Y;
+    const clickX = e.clientX - rect.left - canvas.width / 2;
+    const clickY = e.clientY - rect.top - canvas.height / 2;
+    const tileX = Math.round(clickX / (TILE_SIZE * scale));
+    const tileY = Math.round(clickY / (TILE_SIZE * scale));
+    const relX = player.homeX + tileX;
+    const relY = player.homeY + tileY;
     const biome = getBiome(relX, relY);
 
     if (coordsEl) coordsEl.textContent = `X: ${relX}, Y: ${relY}`;
@@ -325,46 +265,47 @@ window.onload = function () {
 
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const worldX = (mouseX + cameraX) / (TILE_SIZE * scale);
-    const worldY = (mouseY + cameraY) / (TILE_SIZE * scale);
-
     scale = e.deltaY < 0 ? scale * 1.1 : scale / 1.1;
     scale = Math.max(0.3, Math.min(2.5, scale));
-
-    cameraX = worldX * TILE_SIZE * scale - mouseX;
-    cameraY = worldY * TILE_SIZE * scale - mouseY;
-    needsRedraw = true;
+    updateCameraForPlayer(canvas);
   }, { passive: false });
 
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-    const worldX = (clickX + cameraX) / (TILE_SIZE * scale);
-    const worldY = (clickY + cameraY) / (TILE_SIZE * scale);
-    const tileX = Math.floor(worldX) - CENTER_X;
-    const tileY = Math.floor(worldY) - CENTER_Y;
+    const clickX = e.clientX - rect.left - canvas.width / 2;
+    const clickY = e.clientY - rect.top - canvas.height / 2;
+    const tileX = Math.round(clickX / (TILE_SIZE * scale));
+    const tileY = Math.round(clickY / (TILE_SIZE * scale));
+    const targetX = player.homeX + tileX;
+    const targetY = player.homeY + tileY;
 
-    if (actionMode === "build") console.log(`🏗️ Построить на (${tileX}, ${tileY})`);
-    if (actionMode === "move") console.log(`🚚 Переместить в (${tileX}, ${tileY})`);
-    if (actionMode === "army") console.log(`⚔️ Отправить армию на (${tileX}, ${tileY})`);
+    if (actionMode === "build") {
+      console.log(`🏗️ Построить на (${targetX}, ${targetY})`);
+      return;
+    }
+    if (actionMode === "army") {
+      console.log(`⚔️ Отправить армию на (${targetX}, ${targetY})`);
+      return;
+    }
+
+    if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) {
+      return;
+    }
+    player.homeX = targetX;
+    player.homeY = targetY;
+    updateCameraForPlayer(canvas);
   });
 
   document.getElementById("actionBuild")?.addEventListener("click", () => setActionMode("build"));
   document.getElementById("actionMove")?.addEventListener("click", () => setActionMode("move"));
   document.getElementById("actionArmy")?.addEventListener("click", () => setActionMode("army"));
   document.getElementById("actionHome")?.addEventListener("click", () => {
-    centerCameraOnRelativeArea(player.homeX, player.homeY, 2, 2, canvas);
+    updateCameraForPlayer(canvas);
   });
 
   function animate() {
     const cameraChanged = cameraX !== lastCameraX || cameraY !== lastCameraY || scale !== lastScale;
     if (needsRedraw || cameraChanged) {
-      checkAndLoadChunks(canvas);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const view = drawMap(ctx, canvas);
       drawBuildings(ctx, canvas, view);
