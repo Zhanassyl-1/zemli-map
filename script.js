@@ -16,6 +16,7 @@ let lastCameraY = cameraY;
 let lastScale = scale;
 
 const biomeMap = new Array(MAP_WIDTH).fill(null).map(() => new Array(MAP_HEIGHT));
+let resourcesMap = [];
 
 const player = {
   race: "knights",
@@ -29,6 +30,7 @@ const viewCircles = [];
 let towerCount = 0;
 let selectedBuilding = null;
 let selectedCost = "";
+let hoverTile = null;
 
 const resources = {
   wood: 100,
@@ -44,7 +46,9 @@ const buildingEmoji = {
   barracks: "⚔️",
   wall: "🧱",
   tower: "🗼",
-  gold: "💰"
+  gold: "💰",
+  gold_mine: "💰",
+  iron_mine: "⚙️"
 };
 
 const BIOME_COLORS = {
@@ -57,6 +61,13 @@ const BIOME_COLORS = {
   MOUNTAIN: "#8b7d6b",
   SNOW: "#e9ecef",
   STEPPE: "#b8c27a"
+};
+
+const resourceEmoji = {
+  wood: "🌲",
+  stone: "⛰️",
+  iron: "⚙️",
+  gold: "🌟"
 };
 
 const tg = window.Telegram?.WebApp;
@@ -152,6 +163,26 @@ function generateFixedMap() {
   }
 }
 
+function generateResources() {
+  resourcesMap = [];
+  for (let x = 0; x < MAP_WIDTH; x++) {
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      const biome = biomeMap[x][y];
+      const chance = Math.random();
+
+      if (biome === "FOREST" && chance < 0.3) {
+        resourcesMap.push({ x: x - CENTER_X, y: y - CENTER_Y, type: "wood" });
+      } else if (biome === "MOUNTAIN" && chance < 0.1) {
+        resourcesMap.push({ x: x - CENTER_X, y: y - CENTER_Y, type: "iron" });
+      } else if (biome === "MOUNTAIN" && chance < 0.4) {
+        resourcesMap.push({ x: x - CENTER_X, y: y - CENTER_Y, type: "stone" });
+      } else if (biome === "DESERT" && chance < 0.05) {
+        resourcesMap.push({ x: x - CENTER_X, y: y - CENTER_Y, type: "gold" });
+      }
+    }
+  }
+}
+
 function getBiome(relX, relY) {
   const wx = relX + CENTER_X;
   const wy = relY + CENTER_Y;
@@ -228,6 +259,40 @@ function isCellVisible(worldX, worldY) {
   return false;
 }
 
+function hasResourceNearby(x, y, resourceType, distance) {
+  for (const r of resourcesMap) {
+    if (r.type !== resourceType) continue;
+    const dx = Math.abs(r.x - x);
+    const dy = Math.abs(r.y - y);
+    if (dx <= distance && dy <= distance) return true;
+  }
+  return false;
+}
+
+function canBuild(x, y, type) {
+  if (type === "lumber") return hasResourceNearby(x, y, "wood", 2);
+  if (type === "mine") return hasResourceNearby(x, y, "stone", 2);
+  if (type === "iron_mine") return hasResourceNearby(x, y, "iron", 2);
+  if (type === "gold" || type === "gold_mine") return hasResourceNearby(x, y, "gold", 2);
+  if (type === "farm") {
+    const biome = getBiome(x, y);
+    return biome === "PLAINS" || biome === "FOREST";
+  }
+  return true;
+}
+
+function getBuildRestrictionReason(x, y, type) {
+  if (type === "lumber" && !hasResourceNearby(x, y, "wood", 2)) return "Для лесопилки нужен лес рядом";
+  if (type === "mine" && !hasResourceNearby(x, y, "stone", 2)) return "Для шахты нужен камень рядом";
+  if (type === "iron_mine" && !hasResourceNearby(x, y, "iron", 2)) return "Для железной шахты нужно железо рядом";
+  if ((type === "gold" || type === "gold_mine") && !hasResourceNearby(x, y, "gold", 2)) return "Для золотой шахты нужно золото рядом";
+  if (type === "farm") {
+    const biome = getBiome(x, y);
+    if (!(biome === "PLAINS" || biome === "FOREST")) return "Ферму можно строить только на равнине или в лесу";
+  }
+  return "Здесь нельзя строить это здание";
+}
+
 function parseCost(costString) {
   const result = {};
   const re = /(\d+)\s*(wood|stone|iron|gold)/g;
@@ -250,10 +315,26 @@ function spendResources(costString) {
   });
 }
 
-function drawResources(ctx) {
+function drawResourceHud(ctx) {
   ctx.fillStyle = "#FFFFFF";
   ctx.font = '16px "Courier New"';
   ctx.fillText(`🪵 ${resources.wood} 🪨 ${resources.stone} ⛏️ ${resources.iron} 💰 ${resources.gold}`, 10, 30);
+}
+
+function drawResources(ctx) {
+  const tile = TILE_SIZE * scale;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${Math.max(12, tile * 0.8)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.fillStyle = "#FFD700";
+
+  for (const r of resourcesMap) {
+    if (!isCellVisible(r.x, r.y)) continue;
+    const screenX = ((r.x + CENTER_X) * tile) - cameraX + tile / 2;
+    const screenY = ((r.y + CENTER_Y) * tile) - cameraY + tile / 2;
+    if (screenX < -40 || screenY < -40 || screenX > window.innerWidth + 40 || screenY > window.innerHeight + 40) continue;
+    ctx.fillText(resourceEmoji[r.type] || "❓", screenX, screenY);
+  }
 }
 
 function updateInventoryButtons() {
@@ -295,6 +376,35 @@ function setActionMode(mode) {
   if (mode === "army") document.getElementById("actionArmy")?.classList.add("active");
 }
 
+function drawBuildHints(ctx, tile, startCol, startRow, endCol, endRow) {
+  if (actionMode !== "build" || !selectedBuilding) return;
+
+  for (let row = startRow; row < endRow; row++) {
+    const screenY = row * tile - cameraY;
+    for (let col = startCol; col < endCol; col++) {
+      const worldX = col - CENTER_X;
+      const worldY = row - CENTER_Y;
+      if (!isCellVisible(worldX, worldY)) continue;
+      if (getBuilding(worldX, worldY)) continue;
+
+      const ok = canBuild(worldX, worldY, selectedBuilding);
+      ctx.fillStyle = ok ? "rgba(80, 220, 120, 0.17)" : "rgba(220, 80, 80, 0.14)";
+      const screenX = col * tile - cameraX;
+      ctx.fillRect(screenX, screenY, tile + 1, tile + 1);
+    }
+  }
+}
+
+function drawHoverHint(ctx, tile) {
+  if (!hoverTile || actionMode !== "build" || !selectedBuilding) return;
+  const { x, y } = hoverTile;
+  const pos = worldToScreen(x, y, { width: window.innerWidth, height: window.innerHeight });
+  const can = canBuild(x, y, selectedBuilding) && !getBuilding(x, y);
+  ctx.strokeStyle = can ? "#66ff99" : "#ff6666";
+  ctx.lineWidth = Math.max(1, tile * 0.08);
+  ctx.strokeRect(pos.x + 1, pos.y + 1, tile - 2, tile - 2);
+}
+
 function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
   if (tile <= 0.01) return null;
@@ -321,6 +431,9 @@ function drawMap(ctx, canvas) {
       ctx.fillRect(screenX, screenY, tile + 1, tile + 1);
     }
   }
+
+  drawBuildHints(ctx, tile, startCol, startRow, endCol, endRow);
+  drawHoverHint(ctx, tile);
 
   return { tile };
 }
@@ -381,6 +494,7 @@ window.onload = function () {
   window.addEventListener("resize", resizeCanvas);
 
   generateFixedMap();
+  generateResources();
 
   player.race = parseRace();
   const spawn = getSpawnForRace(player.race);
@@ -403,6 +517,7 @@ window.onload = function () {
       selectedBuilding = btn.dataset.type || null;
       selectedCost = btn.dataset.cost || "";
       setActionMode("build");
+      needsRedraw = true;
     });
   });
 
@@ -415,6 +530,9 @@ window.onload = function () {
     const relX = player.homeX + tileX;
     const relY = player.homeY + tileY;
     const biome = getBiome(relX, relY);
+
+    hoverTile = { x: relX, y: relY };
+    needsRedraw = true;
 
     if (coordsEl) coordsEl.textContent = `X: ${relX}, Y: ${relY}`;
     if (biomeInfo) biomeInfo.textContent = biome;
@@ -445,6 +563,10 @@ window.onload = function () {
       }
       if (getBuilding(targetX, targetY)) {
         alert("Здесь уже есть постройка");
+        return;
+      }
+      if (!canBuild(targetX, targetY, selectedBuilding)) {
+        alert(getBuildRestrictionReason(targetX, targetY, selectedBuilding));
         return;
       }
 
@@ -495,8 +617,9 @@ window.onload = function () {
     if (needsRedraw || cameraChanged) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const view = drawMap(ctx, canvas);
-      drawBuildings(ctx, canvas, view);
       drawResources(ctx);
+      drawBuildings(ctx, canvas, view);
+      drawResourceHud(ctx);
 
       lastCameraX = cameraX;
       lastCameraY = cameraY;
