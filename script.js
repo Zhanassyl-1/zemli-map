@@ -47,41 +47,86 @@ if (tg) {
   tg.ready();
 }
 
-function hash2(x, y, seed) {
-  const s = Math.sin((x * 127.1 + y * 311.7 + seed * 17.31) * 0.1) * 43758.5453123;
-  return s - Math.floor(s);
+function fract(v) {
+  return v - Math.floor(v);
 }
 
-function getBiomeBySeed(x, y) {
-  const nx = (x - CENTER_X) / MAP_WIDTH;
-  const ny = (y - CENTER_Y) / MAP_HEIGHT;
+function hash2(x, y, seed) {
+  const n = Math.sin((x * 127.1 + y * 311.7 + seed * 13.37)) * 43758.5453123;
+  return fract(n);
+}
 
-  const continental = hash2(x, y, 1) * 0.55 + hash2(x >> 1, y >> 1, 2) * 0.45;
-  const moisture = hash2(x + 37, y + 91, 3) * 0.6 + hash2(x >> 2, y >> 2, 4) * 0.4;
-  const roughness = hash2(x + 119, y + 61, 5);
+function smoothNoise(x, y, seed) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+  const tx = x - x0;
+  const ty = y - y0;
+  const u = tx * tx * (3 - 2 * tx);
+  const v = ty * ty * (3 - 2 * ty);
 
-  const lat = Math.abs((y - CENTER_Y) / CENTER_Y);
-  const radial = Math.sqrt(nx * nx + ny * ny);
-  const seaBias = Math.max(0, radial - 0.25) * 0.8;
-  const landValue = continental - seaBias;
+  const n00 = hash2(x0, y0, seed);
+  const n10 = hash2(x1, y0, seed);
+  const n01 = hash2(x0, y1, seed);
+  const n11 = hash2(x1, y1, seed);
 
-  if (landValue < 0.35) return "WATER";
-  if (landValue < 0.40) return "COAST";
+  const nx0 = n00 * (1 - u) + n10 * u;
+  const nx1 = n01 * (1 - u) + n11 * u;
+  return nx0 * (1 - v) + nx1 * v;
+}
 
-  if (lat > 0.82) return "SNOW";
-  if (roughness > 0.86) return "MOUNTAIN";
-
-  if (landValue > 0.70 && moisture < 0.34) return "DESERT";
-  if (moisture > 0.72 && lat < 0.55) return "JUNGLE";
-  if (moisture > 0.58) return "FOREST";
-  if (moisture < 0.30) return "STEPPE";
-  return "PLAINS";
+function fbm(x, y, octaves, baseFreq, lacunarity, gain, seed) {
+  let amp = 1;
+  let freq = baseFreq;
+  let sum = 0;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += smoothNoise(x * freq, y * freq, seed + i * 101) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return sum / norm;
 }
 
 function generateFixedMap() {
-  for (let x = 0; x < MAP_WIDTH; x++) {
-    for (let y = 0; y < MAP_HEIGHT; y++) {
-      biomeMap[x][y] = getBiomeBySeed(x, y);
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    const ny = (y - CENTER_Y) / MAP_HEIGHT;
+    const lat = Math.abs((y - CENTER_Y) / CENTER_Y);
+
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      const nx = (x - CENTER_X) / MAP_WIDTH;
+
+      const continental = fbm(nx * 7.0, ny * 7.0, 5, 1.0, 2.0, 0.5, 17) * 2 - 1;
+      const regional = fbm(nx * 16.0, ny * 16.0, 4, 1.0, 2.1, 0.52, 71) * 2 - 1;
+      const local = fbm(nx * 40.0, ny * 40.0, 3, 1.0, 2.2, 0.55, 131) * 2 - 1;
+
+      const edgeDist = Math.sqrt((nx * 1.1) * (nx * 1.1) + (ny * 0.95) * (ny * 0.95));
+      const edgeMask = 1.0 - Math.max(0, edgeDist - 0.35) * 0.9;
+      const elevation = (continental * 0.62 + regional * 0.28 + local * 0.10) * edgeMask;
+
+      if (elevation <= -0.03) {
+        biomeMap[x][y] = "WATER";
+        continue;
+      }
+      if (elevation <= 0.03) {
+        biomeMap[x][y] = "COAST";
+        continue;
+      }
+
+      const moisture = fbm(nx * 25, ny * 25, 4, 1.0, 2.0, 0.5, 401);
+      const mountainNoise = fbm(nx * 30, ny * 30, 3, 1.0, 2.2, 0.55, 777);
+      const centerDist = Math.sqrt(nx * nx + ny * ny) / 0.5;
+      const desertBias = Math.max(0, 1 - centerDist);
+      const temp = 1 - lat;
+
+      if (lat > 0.78) biomeMap[x][y] = "SNOW";
+      else if (mountainNoise > 0.66 || elevation > 0.33) biomeMap[x][y] = "MOUNTAIN";
+      else if (desertBias > 0.55 && temp > 0.62 && moisture < 0.56) biomeMap[x][y] = "DESERT";
+      else if (temp > 0.68 && moisture > 0.58) biomeMap[x][y] = "JUNGLE";
+      else if (moisture > 0.57) biomeMap[x][y] = "FOREST";
+      else biomeMap[x][y] = "PLAINS";
     }
   }
 }
@@ -201,12 +246,6 @@ function drawMap(ctx, canvas) {
     }
   }
 
-  ctx.strokeStyle = "rgba(255,255,255,0.3)";
-  ctx.lineWidth = Math.max(1, tile * 0.06);
-  ctx.beginPath();
-  ctx.arc(canvas.width / 2, canvas.height / 2, radius * tile, 0, Math.PI * 2);
-  ctx.stroke();
-
   return { tile };
 }
 
@@ -314,21 +353,15 @@ window.onload = function () {
 
     if (actionMode === "build") {
       console.log(`🏗️ Построить на (${targetX}, ${targetY})`);
-      // Temporary: tower build increases view radius.
-      addTower();
       return;
     }
     if (actionMode === "army") {
       console.log(`⚔️ Отправить армию на (${targetX}, ${targetY})`);
       return;
     }
-
-    if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) {
-      return;
+    if (actionMode === "move") {
+      console.log(`🚚 Переместить в (${targetX}, ${targetY})`);
     }
-    player.homeX = targetX;
-    player.homeY = targetY;
-    updateCameraForPlayer(canvas);
   });
 
   document.getElementById("actionBuild")?.addEventListener("click", () => setActionMode("build"));
