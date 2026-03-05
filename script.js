@@ -24,6 +24,8 @@ const player = {
 };
 
 const buildingsMap = {};
+const viewCircles = [];
+
 let towerCount = 0;
 let selectedBuilding = null;
 let selectedCost = "";
@@ -182,10 +184,6 @@ function getSpawnForRace(race) {
   return { x: 0, y: 0 };
 }
 
-function getViewRadius() {
-  return BASE_RADIUS + towerCount * 2;
-}
-
 function getTowerCost() {
   return {
     wood: 50 * Math.pow(2, towerCount),
@@ -198,6 +196,14 @@ function canAffordTower() {
   return resources.wood >= cost.wood && resources.stone >= cost.stone;
 }
 
+function addBuilding(building) {
+  buildingsMap[`${building.x},${building.y}`] = building;
+}
+
+function getBuilding(x, y) {
+  return buildingsMap[`${x},${y}`] || null;
+}
+
 function buildTower(x, y) {
   const cost = getTowerCost();
   if (!canAffordTower()) return false;
@@ -205,31 +211,21 @@ function buildTower(x, y) {
   resources.wood -= cost.wood;
   resources.stone -= cost.stone;
   towerCount += 1;
-  addBuilding({
-    x,
-    y,
-    width: 1,
-    height: 1,
-    emoji: "🗼",
-    type: "tower"
-  });
+
+  addBuilding({ x, y, width: 1, height: 1, emoji: "🗼", type: "tower" });
+  viewCircles.push({ x, y, radius: 5 });
   needsRedraw = true;
   return true;
 }
 
-function isInViewRange(centerX, centerY, targetX, targetY) {
-  const dx = Math.abs(centerX - targetX);
-  const dy = Math.abs(centerY - targetY);
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  return distance <= getViewRadius();
-}
-
-function addBuilding(building) {
-  buildingsMap[`${building.x},${building.y}`] = building;
-}
-
-function getBuilding(x, y) {
-  return buildingsMap[`${x},${y}`] || null;
+function isCellVisible(worldX, worldY) {
+  for (const circle of viewCircles) {
+    const dx = Math.abs(circle.x - worldX);
+    const dy = Math.abs(circle.y - worldY);
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance <= circle.radius) return true;
+  }
+  return false;
 }
 
 function parseCost(costString) {
@@ -264,35 +260,24 @@ function updateInventoryButtons() {
   document.querySelectorAll(".inv-btn").forEach((btn) => {
     const type = btn.dataset.type || "";
     const cost = btn.dataset.cost || "";
+
     if (type === "tower") {
       const towerCost = getTowerCost();
       btn.textContent = `🗼 Вышка (${towerCost.wood}🪵 ${towerCost.stone}🪨)`;
       btn.disabled = !canAffordTower();
       return;
     }
+
     btn.disabled = !canAfford(cost);
   });
 }
 
-function worldToScreenAroundPlayer(relX, relY, canvas) {
+function worldToScreen(relX, relY, canvas) {
   const tile = TILE_SIZE * scale;
-  const dx = relX - player.homeX;
-  const dy = relY - player.homeY;
   return {
-    x: dx * tile + canvas.width / 2 - tile / 2,
-    y: dy * tile + canvas.height / 2 - tile / 2
+    x: ((relX + CENTER_X) * tile) - cameraX,
+    y: ((relY + CENTER_Y) * tile) - cameraY
   };
-}
-
-function centerCameraOnRelativeArea(relX, relY, width = 1, height = 1, canvas = null) {
-  const tile = TILE_SIZE * scale;
-  const viewportW = canvas ? canvas.width : window.innerWidth;
-  const viewportH = canvas ? canvas.height : window.innerHeight;
-  const worldCenterX = relX + CENTER_X + width / 2;
-  const worldCenterY = relY + CENTER_Y + height / 2;
-  cameraX = worldCenterX * tile - viewportW / 2;
-  cameraY = worldCenterY * tile - viewportH / 2;
-  needsRedraw = true;
 }
 
 function updateCameraForPlayer(canvas) {
@@ -314,25 +299,25 @@ function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
   if (tile <= 0.01) return null;
 
-  const centerX = player.homeX + CENTER_X;
-  const centerY = player.homeY + CENTER_Y;
-  const radius = getViewRadius();
-  const half = tile / 2;
-
   ctx.imageSmoothingEnabled = false;
 
-  const startCol = Math.max(0, centerX - radius);
-  const startRow = Math.max(0, centerY - radius);
-  const endCol = Math.min(MAP_WIDTH, centerX + radius + 1);
-  const endRow = Math.min(MAP_HEIGHT, centerY + radius + 1);
+  const startCol = Math.max(0, Math.floor(cameraX / tile) - 2);
+  const startRow = Math.max(0, Math.floor(cameraY / tile) - 2);
+  const endCol = Math.min(MAP_WIDTH, startCol + Math.ceil(canvas.width / tile) + 4);
+  const endRow = Math.min(MAP_HEIGHT, startRow + Math.ceil(canvas.height / tile) + 4);
 
   for (let row = startRow; row < endRow; row++) {
+    const screenY = row * tile - cameraY;
     for (let col = startCol; col < endCol; col++) {
-      if (!isInViewRange(centerX, centerY, col, row)) continue;
-      const screenX = ((col - centerX) * tile) + canvas.width / 2 - half;
-      const screenY = ((row - centerY) * tile) + canvas.height / 2 - half;
-      const biome = biomeMap[col]?.[row] || "WATER";
-      ctx.fillStyle = getBiomeColor(biome);
+      const screenX = col * tile - cameraX;
+      const worldX = col - CENTER_X;
+      const worldY = row - CENTER_Y;
+      if (isCellVisible(worldX, worldY)) {
+        const biome = biomeMap[col]?.[row] || "WATER";
+        ctx.fillStyle = getBiomeColor(biome);
+      } else {
+        ctx.fillStyle = "#111";
+      }
       ctx.fillRect(screenX, screenY, tile + 1, tile + 1);
     }
   }
@@ -346,19 +331,13 @@ function drawBuildings(ctx, canvas, view) {
 
   for (const key in buildingsMap) {
     const b = buildingsMap[key];
-    const worldX = b.x + CENTER_X;
-    const worldY = b.y + CENTER_Y;
-    const centerX = player.homeX + CENTER_X;
-    const centerY = player.homeY + CENTER_Y;
-    if (!isInViewRange(centerX, centerY, worldX, worldY)) continue;
+    if (!isCellVisible(b.x, b.y)) continue;
 
-    const pos = worldToScreenAroundPlayer(b.x, b.y, canvas);
+    const pos = worldToScreen(b.x, b.y, canvas);
     const bw = (b.width || 1) * tile;
     const bh = (b.height || 1) * tile;
 
-    if (pos.x > canvas.width || pos.y > canvas.height || pos.x + bw < 0 || pos.y + bh < 0) {
-      continue;
-    }
+    if (pos.x > canvas.width || pos.y > canvas.height || pos.x + bw < 0 || pos.y + bh < 0) continue;
 
     const stickerX = pos.x + bw / 2;
     const stickerY = pos.y + bh / 2;
@@ -408,7 +387,10 @@ window.onload = function () {
   player.homeX = spawn.x;
   player.homeY = spawn.y;
 
-  addBuilding({ x: player.homeX, y: player.homeY, width: 2, height: 2, color: "#8B8B8B", emoji: "🏰" });
+  viewCircles.length = 0;
+  viewCircles.push({ x: player.homeX, y: player.homeY, radius: BASE_RADIUS });
+
+  addBuilding({ x: player.homeX, y: player.homeY, width: 2, height: 2, emoji: "🏰", type: "capitol" });
 
   updateCameraForPlayer(canvas);
   updateInventoryButtons();
@@ -454,12 +436,11 @@ window.onload = function () {
     const targetX = player.homeX + tileX;
     const targetY = player.homeY + tileY;
 
+    if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) return;
+
     if (actionMode === "build") {
       if (!selectedBuilding) {
         alert("Выбери постройку в инвентаре");
-        return;
-      }
-      if (targetX + CENTER_X < 0 || targetX + CENTER_X >= MAP_WIDTH || targetY + CENTER_Y < 0 || targetY + CENTER_Y >= MAP_HEIGHT) {
         return;
       }
       if (getBuilding(targetX, targetY)) {
@@ -489,11 +470,12 @@ window.onload = function () {
           type: selectedBuilding
         });
       }
+
       updateInventoryButtons();
       needsRedraw = true;
-      console.log(`🏗️ Построить на (${targetX}, ${targetY})`);
       return;
     }
+
     if (actionMode === "army") {
       console.log(`⚔️ Отправить армию на (${targetX}, ${targetY})`);
       return;
@@ -506,9 +488,7 @@ window.onload = function () {
   document.getElementById("actionBuild")?.addEventListener("click", () => setActionMode("build"));
   document.getElementById("actionMove")?.addEventListener("click", () => setActionMode("move"));
   document.getElementById("actionArmy")?.addEventListener("click", () => setActionMode("army"));
-  document.getElementById("actionHome")?.addEventListener("click", () => {
-    updateCameraForPlayer(canvas);
-  });
+  document.getElementById("actionHome")?.addEventListener("click", () => updateCameraForPlayer(canvas));
 
   function animate() {
     const cameraChanged = cameraX !== lastCameraX || cameraY !== lastCameraY || scale !== lastScale;
