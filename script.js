@@ -9,13 +9,21 @@ let cameraX = CENTER_X * TILE_SIZE - window.innerWidth / 2;
 let cameraY = CENTER_Y * TILE_SIZE - window.innerHeight / 2;
 let scale = 0.7;
 let actionMode = null;
-const SPECIAL_BUILDING = {
-  x: 12,
-  y: 8,
-  width: 2,
-  height: 2,
-  color: '#8B8B8B'
-};
+let needsRedraw = true;
+let lastCameraX = cameraX;
+let lastCameraY = cameraY;
+let lastScale = scale;
+
+const buildingsMap = {};
+const HOME_BUILDING_KEY = '12,8';
+
+function addBuilding(building) {
+  buildingsMap[`${building.x},${building.y}`] = building;
+}
+
+function getBuilding(x, y) {
+  return buildingsMap[`${x},${y}`] || null;
+}
 
 const tg = window.Telegram?.WebApp;
 if (tg) {
@@ -228,12 +236,22 @@ function biomeName(code) {
   }
 }
 
+function getBiome(relX, relY) {
+  const wx = relX + CENTER_X;
+  const wy = relY + CENTER_Y;
+  if (wx < 0 || wy < 0 || wx >= MAP_WIDTH || wy >= MAP_HEIGHT) {
+    return BIOME.OCEAN;
+  }
+  return biomeMap[idx(wx, wy)];
+}
+
 function centerCameraOnRelativeArea(relX, relY, width = 1, height = 1) {
   const tile = TILE_SIZE * scale;
   const worldCenterX = relX + CENTER_X + (width / 2);
   const worldCenterY = relY + CENTER_Y + (height / 2);
   cameraX = worldCenterX * tile - window.innerWidth / 2;
   cameraY = worldCenterY * tile - window.innerHeight / 2;
+  needsRedraw = true;
 }
 
 function setActionMode(mode) {
@@ -246,7 +264,7 @@ function setActionMode(mode) {
 
 function drawMap(ctx, canvas) {
   const tile = TILE_SIZE * scale;
-  if (tile <= 0.01) return;
+  if (tile <= 0.01) return null;
 
   let startCol = Math.floor(cameraX / tile);
   let startRow = Math.floor(cameraY / tile);
@@ -269,20 +287,28 @@ function drawMap(ctx, canvas) {
       ctx.fillRect(x, y, tile + 1, tile + 1);
     }
   }
+  return { tile };
+}
 
-  const buildingWorldX = SPECIAL_BUILDING.x + CENTER_X;
-  const buildingWorldY = SPECIAL_BUILDING.y + CENTER_Y;
-  const buildingDrawX = buildingWorldX * tile - cameraX;
-  const buildingDrawY = buildingWorldY * tile - cameraY;
-  const buildingW = SPECIAL_BUILDING.width * tile;
-  const buildingH = SPECIAL_BUILDING.height * tile;
-
-  if (
-    !(buildingDrawX > canvas.width ||
+function drawBuildings(ctx, canvas, view) {
+  if (!view) return;
+  const { tile } = view;
+  for (const key in buildingsMap) {
+    const b = buildingsMap[key];
+    const width = b.width || 1;
+    const height = b.height || 1;
+    const buildingDrawX = (b.x + CENTER_X) * tile - cameraX;
+    const buildingDrawY = (b.y + CENTER_Y) * tile - cameraY;
+    const buildingW = width * tile;
+    const buildingH = height * tile;
+    if (
+      buildingDrawX > canvas.width ||
       buildingDrawY > canvas.height ||
       buildingDrawX + buildingW < 0 ||
-      buildingDrawY + buildingH < 0)
-  ) {
+      buildingDrawY + buildingH < 0
+    ) {
+      continue;
+    }
     const stickerX = buildingDrawX + buildingW / 2;
     const stickerY = buildingDrawY + buildingH / 2;
     const stickerRadius = Math.max(8, tile * 0.52);
@@ -300,7 +326,7 @@ function drawMap(ctx, canvas) {
     ctx.textBaseline = 'middle';
     ctx.font = `${stickerSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Courier New",sans-serif`;
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText('🏰', stickerX, stickerY + tile * 0.02);
+    ctx.fillText(b.emoji || '🏰', stickerX, stickerY + tile * 0.02);
   }
 }
 
@@ -308,6 +334,7 @@ window.onload = function () {
   console.log('🎮 Starting world generation...');
   const threshold = generateElevationAndThreshold();
   assignBiomes(threshold);
+  addBuilding({ x: 12, y: 8, width: 2, height: 2, color: '#8B8B8B', emoji: '🏰' });
 
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
@@ -317,6 +344,7 @@ window.onload = function () {
   function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    needsRedraw = true;
   }
 
   window.addEventListener('resize', resizeCanvas);
@@ -340,6 +368,7 @@ window.onload = function () {
     cameraY -= dy;
     lastX = e.clientX;
     lastY = e.clientY;
+    needsRedraw = true;
   });
 
   window.addEventListener('mouseup', () => {
@@ -355,8 +384,7 @@ window.onload = function () {
 
     const relX = wx - CENTER_X;
     const relY = wy - CENTER_Y;
-    const inside = wx >= 0 && wy >= 0 && wx < MAP_WIDTH && wy < MAP_HEIGHT;
-    const b = inside ? biomeMap[idx(wx, wy)] : BIOME.OCEAN;
+    const b = getBiome(relX, relY);
 
     if (coordsEl) coordsEl.textContent = `X: ${relX}, Y: ${relY}`;
     if (biomeInfo) biomeInfo.textContent = biomeName(b);
@@ -377,6 +405,7 @@ window.onload = function () {
 
     cameraX = (worldX * TILE_SIZE * scale) - mouseX;
     cameraY = (worldY * TILE_SIZE * scale) - mouseY;
+    needsRedraw = true;
   });
 
   const actionBuild = document.getElementById('actionBuild');
@@ -388,11 +417,13 @@ window.onload = function () {
   if (actionMove) actionMove.onclick = () => setActionMode('move');
   if (actionArmy) actionArmy.onclick = () => setActionMode('army');
   if (actionHome) actionHome.onclick = () => {
+    const homeBuilding = buildingsMap[HOME_BUILDING_KEY] || getBuilding(12, 8);
+    if (!homeBuilding) return;
     centerCameraOnRelativeArea(
-      SPECIAL_BUILDING.x,
-      SPECIAL_BUILDING.y,
-      SPECIAL_BUILDING.width,
-      SPECIAL_BUILDING.height
+      homeBuilding.x,
+      homeBuilding.y,
+      homeBuilding.width || 1,
+      homeBuilding.height || 1
     );
   };
 
@@ -415,8 +446,16 @@ window.onload = function () {
   });
 
   function animate() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawMap(ctx, canvas);
+    const cameraChanged = cameraX !== lastCameraX || cameraY !== lastCameraY || scale !== lastScale;
+    if (needsRedraw || cameraChanged) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const view = drawMap(ctx, canvas);
+      drawBuildings(ctx, canvas, view);
+      lastCameraX = cameraX;
+      lastCameraY = cameraY;
+      lastScale = scale;
+      needsRedraw = false;
+    }
     requestAnimationFrame(animate);
   }
 
